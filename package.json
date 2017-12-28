@@ -1,0 +1,42 @@
+{
+  "name": "resource-monitor",
+  "version": "0.0.1",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "engines": {
+    "node": "8.9.1"
+  },
+  "author": "",
+  "private": true,
+  "dependencies": {
+    "amqplib": "0.5.2",
+    "async": "^2.6.0",
+    "body-parser": "^1.18.2",
+    "cpu-stat": "^2.0.1",
+    "diskspace": "^2.0.0",
+    "express": "^4.16.2",
+    "express-monitor": "0.0.6",
+    "express-status-monitor": "^1.0.1",
+    "http": "0.0.0",
+    "js-network-monitor": "^1.0.9",
+    "measured": "^1.1.0",
+    "mem-stat": "^1.0.5",
+    "metrics": "^0.1.14",
+    "moment": "^2.19.3",
+    "moment-timezone": "^0.5.14",
+    "mongodb": "2.2.30",
+    "mongoose": "^4.12.5",
+    "monitor": "^0.6.10",
+    "net-stat": "^2.0.1",
+    "node-monitor": "^0.3.11",
+    "nodemailer": "^4.4.1",
+    "pidusage": "^1.2.0",
+    "process-stats": "^2.0.1",
+    "request-stats": "^3.0.0",
+    "slack-notify": "^0.1.6",
+    "textbelt": "0.0.3"
+  }
+}
