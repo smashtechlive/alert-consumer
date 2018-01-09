@@ -239,13 +239,13 @@ function checkIfAlertExists(developer, record) {
 
   return config.db.collection("alert").find(query).toArray()
     .then((response) => {
-    if(response.length < 1) {
+   if(response.length < 1) {
      return true;
     }
   })
 }
 
-function skinnyFitWebCPUAlert(req, res) {
+function skinnyFitWebCPUAlert(req, res, callback) {
 
 
   // let inputData = req.body.inputJson;
@@ -264,7 +264,7 @@ function skinnyFitWebCPUAlert(req, res) {
       },
   };
   // set up query time
-  let queryThreshold = minute * 1500;
+  let queryThreshold = minute * 15;
   let date = new Date().getTime() - queryThreshold;
   let dateTime = new Date(date);
   let momentTime = momentTimezone.tz(dateTime, "America/Los_Angeles");
@@ -283,22 +283,25 @@ function skinnyFitWebCPUAlert(req, res) {
   if(inputData.route) {
     query.route = inputData.route;
   }
-
+  // beginning wrap in promise
   return config.db.collection("redThreshold").find(query, {source: 1, name: 1, value: 1, utcDateTime: 1, "_id": 1, route: 1}).toArray().then((records) =>{
     if(records.length < 1) {
-      return skinnyFitWebCPUAlert();
+      console.log('No Records');
+      return continuousAlert();
     }
     // iterate through each found redThreshold record that could be sent as an alert
     async.eachSeries(records, function (record, cb) {
       async.series([
         function (cb) {
+        // wrap in promise
         checkIfAlertExists(inputData, record).then((response) => {
           if(response === true) {
+            console.log('sending now');
             sendAlert(inputData, record).then((next) => {
               saveAlert(inputData, record);
             })
-            // else {}
-
+          } else if(!response) {
+            console.log('sent already')
           }
         });
             cb(null);
@@ -310,23 +313,33 @@ function skinnyFitWebCPUAlert(req, res) {
           }, 10);
         });
     });
+    // how can I be confident that it has iterated through all records
+    // callback, restart the alert consumer
+    // TODO add catch block for mongo authenticate, just have it keep going not fail the whole server
+    console.log('RESTART', records.length);
+      continuousAlert();
+  //  }
   })
-}
 
+  // end wrap of promise
+}
+// start alert consumer
 setTimeout(function() {
   let req,res;
   skinnyFitWebCPUAlert(req, res);
 }, 2000);
 
+// continuously run alert consumer
+function continuousAlert(){
+  // call first function and pass in a callback function which
+  // first function runs when it has completed
+  setTimeout(function() {
+   // console.log('CONTINIOUS ALERT');
+    let req,res;
+    skinnyFitWebCPUAlert(req, res);
+  }, 20000);
 
-
-
-
-
-
-
-
-
+}
 
 
 
