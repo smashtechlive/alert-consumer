@@ -89,7 +89,7 @@ function sendSMSAlert(smsAddress, source, type, value) {
     subject: 'Smashtech notification ',
     //  text: 'There has been an issue on microservice' + source +'.' + type + 'has exceeded the alert threshold with a value of' + value
     //text: ' microservice is having red flags with the metric '
-    text: source + ' microservice is having red flags with the metric ' + type + '. ' + 'The value of ' + type + ' is ' + value
+    text: source + ' microservice is having red flags, the metric ' + type + '. ' + 'The value of ' + type + ' is ' + value
   };
 
   return transporter.sendMail(mailOptions, function(error, info){
