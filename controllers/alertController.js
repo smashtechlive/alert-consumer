@@ -1,25 +1,16 @@
 const express = require('express');
 const app = express();
 var config = require('../lib/config.js');
-var bodyParser = require('body-parser')
-let pusage = require('pidusage');
-let procStats = require('process-stats');
+var bodyParser = require('body-parser');
+var misc = require('../lib/misc')
+var log = require('../lib/log')
 const Mongoose = require('mongoose');
-let diskspace = require('diskspace');
-var http  = require('http');
-var stats = require('measured').createCollection();
-var requestStats = require('request-stats');
 var nodemailer = require('nodemailer');
 var MY_SLACK_WEBHOOK_URL = 'https://hooks.slack.com/services/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';
-//var MY_SLACK_WEBHOOK_URL = 'https://myaccountname.slack.com/services/hooks/incoming-webhook?token=myToken';
 var slack = require('slack-notify')(MY_SLACK_WEBHOOK_URL);
-
-var requests = [];
-var requestTrimThreshold = 5000;
-var requestTrimSize = 4000;
-var requests = [];
-var requestTrimThreshold = 5000;
-var requestTrimSize = 4000;
+let moment = require('moment');
+let momentTimezone = require('moment-timezone');
+let async = require('async');
 
 
 // time constants
@@ -33,221 +24,276 @@ const halfDay =  hour * 12;
 const day =  hour * 24;
 const week = day * 7;
 
-// send a slack notification to a user(s)
-function alertSlack(channel, source, field, value) {
-    return slack.send({
-        //channel: 'notification'
-        channel: '#devbackend',
-        // text: 'Microserve' + source + field + value
-        text: 'Microserve',
-        username: 'Zachary Brody'
-    })
-    // posts to the alert channel
-    // slack.alert({
-    //     text: 'Current server stats',
-    //     attachments: [
-    //         {
-    //             fallback: 'Required Fallback String',
-    //             fields: [
-    //                 { title: 'CPU usage', value: '7.51%', short: true },
-    //                 { title: 'Memory usage', value: '254mb', short: true }
-    //             ]
-    //         }
-    //     ]
-    // });
+
+function sendSlackAlert(channel, source, field, value) {
+  return slack.send({
+    "id": 1,
+    "type": "message",
+    "channel": channel,
+    "text": "the microservice" + source + ' has a field: ' + field + 'with a value of: ' + value
+  })
 }
 
 // send a email notification to a user(s)
-function alertEmail(email, source, type, value) {
-    var transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: 'zbrod92@gmail.com',
-            pass: 'october2'
-        }
-    });
+// build the message before it hits this function, pass in the message as a param
+function sendEmailAlert(email, source, type, value, utcDateTime) {
+  let transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: 'zbrod92@gmail.com',
+      pass: 'october2'
+    }
+  });
 
-    var mailOptions = {
-        // from: smashtechNotification@gmail.com
-        from: 'zbrod92@gmail.com',
-        // to: email,
-        to: 'zachary@smashtech.com',
-        // subject: source + type + 'SmashTech'
-        subject: 'Smashtech Notification',
-        // text: 'There has been an issue on microservice' + source +'.' type 'has exceeded the alert threshold with a value of' + value
-        text: 'There has been an issue on microservice'
-    };
+  let mailOptions = {
+    // from: smashtechNotification@gmail.com
+    from: 'zbrod92@gmail.com',
+    // to: email,
+    to: email,
+    // subject: source + type + 'SmashTech'
+    // subject: source + ' microservice is having red flags' + type + '. ' + 'The value of ' + type + ' is ' + value ,
+    //subject: 'microservice is having red flags',
+    subject: source + ' is having red flags',
+    // text: 'There has been an issue on microservice' + source +'.' type 'has exceeded the alert threshold with a value of' + value
+    text: source + ' microservice is having red flags with the metric ' + type + ' . ' + 'The value of ' + type + ' is ' + value
+    // text: ' microservice is having red flags with the metric '
+  };
 
-    transporter.sendMail(mailOptions, function(error, info){
-        if (error) {
-            console.log(error);
-        } else {
-            console.log('Email sent: ' + info.response);
-        }
-    });
+  return transporter.sendMail(mailOptions, function(error, info){
+    if (error) {
+      console.log(error);
+    } else {
+      console.log('Email sent: ' + info.response);
+    }
+  });
 }
 
 
 // send a SMS  notification to a user(s)
-function alertSMS(smsAddress, source, type, value) {
-    var transporter = nodemailer.createTransport({
-        service: 'gmail',
-        auth: {
-            user: 'zbrod92@gmail.com',
-            pass: 'october2'
-        }
-    });
+function sendSMSAlert(smsAddress, source, type, value) {
+  let transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: 'zbrod92@gmail.com',
+      pass: 'october2'
+    }
+  });
 
-    var mailOptions = {
-        // from: smashtechNotification@gmail.com
-        from: 'zbrod92@gmail.com',
-        // to: email,
-        to: '61935834708@txt.att.net',
-        // subject: source + type + 'SmashTech'
-        // subject: 'Smashtech Notification',
-        // text: 'There has been an issue on microservice' + source +'.' type 'has exceeded the alert threshold with a value of' + value
-        text: 'There has been an issue on microservice'
-    };
+  let mailOptions = {
+    // from: smashtechNotification@gmail.com
+    from: 'zbrod92@gmail.com',
+    // to: email,
+    to: smsAddress,
+    // subject: source + type + 'SmashTech'
+    //  subject: 'Smashtech notification ' + source + field + value,
+    subject: 'Smashtech notification ',
+    //  text: 'There has been an issue on microservice' + source +'.' + type + 'has exceeded the alert threshold with a value of' + value
+    //text: ' microservice is having red flags with the metric '
+    text: source + ' microservice is having red flags with the metric ' + type + '. ' + 'The value of ' + type + ' is ' + value
+  };
 
-    transporter.sendMail(mailOptions, function(error, info){
-        if (error) {
-            console.log(error);
-        } else {
-            console.log('SMS sent: ' + info.response);
-        }
+  return transporter.sendMail(mailOptions, function(error, info){
+    if (error) {
+      console.log(error);
+    } else {
+      console.log('SMS sent: ' + info.response);
+    }
+  });
+}
+// TODO add a function that makes sure the developer doesnt get blown up with a million messages
+
+function sendAlert(developer, record) {
+  // TODO add a timestamp field to the recordObject so that I can log that in mongo
+  let recordObject = Object.assign(developer, record);
+  let promises = [];
+  // TODO add a utcDateField either here or on the log consumer to set a timestamp to now for the alert. So that every alert has a timestamp of when it was sent out
+  if(developer.smsAlert === true) {
+    console.log('sendSMS');
+    recordObject.type = 'sms';
+    promises.push(sendSMSAlert(recordObject.sms, recordObject.source, recordObject.name, recordObject.value));
+  } if(developer.slackAlert === true) {
+    console.log('sendSlack');
+    recordObject.type = 'slack';
+    promises.push(sendSlackAlert(recordObject.slackChannel, recordObject.source, recordObject.name, recordObject.value));
+  } if(developer.emailAlert === true) {
+    console.log('sendEmail');
+    recordObject.type = 'email';
+    promises.push(sendEmailAlert(recordObject.email, recordObject.source, recordObject.name, recordObject.value))
+  }
+  return Promise.all(promises);
+}
+
+function saveAlert(developer, record) {
+  // TODO add a timestamp field to the recordObject so that I can log that in mongo
+  let recordObject = Object.assign(developer, record);
+  let promises = [];
+  // TODO trim object that is being saved
+  recordObject.sentTo = recordObject.devName;
+  // TODO add a utcDateField either here or on the log consumer to set a timestamp to now for the alert. So that every alert has a timestamp of when it was sent out
+  if(developer.smsAlert === true) {
+    console.log('sendSMS');
+    recordObject.type = 'sms';
+    promises.push(config.db.collection("alert").insertOne(recordObject));
+  } if(developer.slackAlert === true) {
+    console.log('saveSlack');
+    recordObject.type = 'slack';
+    promises.push(config.db.collection("alert").insertOne(recordObject));
+  } if(developer.emailAlert === true) {
+    console.log('saveEmail');
+    recordObject.type = 'email';
+    promises.push(config.db.collection("alert").insertOne(recordObject));
+  }
+  return Promise.all(promises);
+}
+/**
+ * Check if an alert has already been sent
+ * @param developer
+ * @param record
+ * @returns {Promise|*|PromiseLike<T>|Promise<T>}
+ */
+function checkIfAlertExists(developer, record) {
+
+  // let queryThreshold = minute * 1500;
+  // let date = new Date().getTime() - queryThreshold;
+  // let dateTime = new Date(date);
+  // let momentTime = momentTimezone.tz(dateTime, "America/Los_Angeles");
+  // let nowMinusQueryThreshold = moment.utc(momentTime).format("YYYY-MM-DD HH:mm:ss");
+
+  let query = {
+    //  utcDateTime: record.utcDateTime,
+    devName: developer.devName,
+    source: record.source,
+    name: record.name,
+    value: record.value,
+  };
+
+  if(record.route) {
+    query.route = record.route
+  }
+
+  return config.db.collection("alert").find(query).toArray()
+    .then((response) => {
+      if(response.length < 1) {
+        return true;
+      }
+    })
+}
+
+function skinnyFitWebCPUAlert(req, res, callback) {
+
+  // let inputData = req.body.inputJson;
+  // let inputData = {
+  //   devName: 'zach',
+  //   email: 'zachary@smashtech.com',
+  //   sms: '9162145091@messaging.sprintpcs.com',
+  //   slackChannel: '@zach',
+  //   emailAlert: true,
+  //   smsAlert: true,
+  //   slackAlert: true,
+  //   source: 'skinnyfit-web',
+  //   name: 'responseTime',
+  //   value: {
+  //     $gte: 1,
+  //   },
+  // };
+  // TODO make this a get route not just a script, this way people can upload their params of their desired alert into the the req.query
+  // TODO should this be from req.body now that its a post script and not req.query
+  let inputData = {
+    devName: req.body.devName,
+    email: req.body.email,
+    sms: req.body.sms,
+    slackChannel: req.body.slackChannel,
+    emailAlert: req.body.emailAlert,
+    smsAlert: req.body.smsAlert,
+    slackAlert: req.body.slackAlerta,
+    source: req.body.source,
+    name: req.body.name,
+    value: {
+      $gte: req.body.value,
+    },
+  };
+
+  // set up query time
+  let queryThreshold = minute * 100;
+  let date = new Date().getTime() - queryThreshold;
+  let dateTime = new Date(date);
+  let momentTime = momentTimezone.tz(dateTime, "America/Los_Angeles");
+  let nowMinusQueryThreshold = moment.utc(momentTime).format("YYYY-MM-DD HH:mm:ss");
+
+  let query = {
+    'source': inputData.source,
+    'name': inputData.name,
+    'value': inputData.value,
+    // should this be set or should this be variable based off the input json as well
+    "utcDateTime": {
+      $gte: nowMinusQueryThreshold,
+    },
+  };
+
+  if(inputData.route) {
+    query.route = inputData.route;
+  }
+  // beginning wrap in promise
+  return config.db.collection("redThreshold").find(query, {source: 1, name: 1, value: 1, utcDateTime: 1, "_id": 1, route: 1}).toArray().then((records) =>{
+    if(records.length < 1) {
+      console.log('No Records');
+      return continuousAlert(req);
+    }
+    // iterate through each found redThreshold record that could be sent as an alert
+    async.eachSeries(records, function (record, cb) {
+      async.series([
+          function (cb) {
+            // wrap in promise
+            checkIfAlertExists(inputData, record).then((response) => {
+              if(response === true) {
+                console.log('sending now');
+                sendAlert(inputData, record).then((next) => {
+                  saveAlert(inputData, record);
+                })
+              } else if(!response) {
+                console.log('sent already')
+              }
+            });
+            cb(null);
+          },
+        ],
+        function (err) {
+          setTimeout(function () {
+            cb();
+          }, 10);
+        });
     });
+    // how can I be confident that it has iterated through all records
+    // callback, restart the alert consumer
+    // TODO add catch block for mongo authenticate, just have it keep going not fail the whole server
+    console.log('RESTART', records.length);
+    continuousAlert(req);
+    //  }
+  })
+
+  // end wrap of promise
+}
+// start alert consumer
+// setTimeout(function() {
+//   let req,res;
+//   skinnyFitWebCPUAlert(req, res);
+// }, 5000);
+
+// continuously run alert consumer
+function continuousAlert(req){
+    // TODO if no req.body then throw an error
+  // TODO add potections
+  // call first function and pass in a callback function which
+  // first function runs when it has completed
+  setTimeout(function() {
+    console.log('CONTINIOUS ALERT');
+    skinnyFitWebCPUAlert(req);
+  }, 20000);
+
 }
 
 
 
-// promise.all the emails and sms and stuff
-function alertConsumer(req, res) {
-    let pollingTime = 60000;
-    setInterval(function () {
-
-        // alert thresholds
-        let storageAlertThreshold = 60;
-        let memoryAlertThreshold = 60;
-        let cpuAlertThreshold = 60;
-        let rpsAlertThreshold = 200;
-        let timeAlertThreshold = 1500;
-
-        // map of devs to microservices
-        let zach = {
-            name: 'zach',
-            email: 'zachary@smashtech.com',
-            sms: '9162145091@messaging.sprintpcs.com'
-        };
-        let eric = {
-            name: 'eric',
-            email: 'eric@smashtech.com',
-            sms: '928-671-1905@vtext.com'
-        };
-        let brandon = {
-            name: 'brandon',
-            email: 'brandongagon@gmail',
-            sms: '6195499615@tmomail.net'
-        };
-        let jeremy = {
-            name: 'jeremy',
-            email: 'jeremy@smashtech.com',
-            sms: '60230019221@vtext.com'
-        };
-        let dylan = {
-            name: 'dylan',
-            email: 'dylan@smashtech.com',
-            sms: '8583349198@vtext.com'
-        };
-        let johnny = {
-            name: 'johnny',
-            email: 'johnny@smashtech.com',
-            sms: '61935834708@txt.att.net'
-        };
-        let rodger = {
-            name: 'rodger',
-            email: 'roger@smashtech',
-            sms: '6197970291@tmomail.net'
-        };
-        let developers = [zach, eric, brandon, jeremy, dylan, johnny, rodger];
-
-        let microServices = [{source: 'log-consumer', developers: [zach]}]
-
-        // query redThreshold to find nerve racking metrics
-        let now = new Date();
-        let time = now.getTime() - min;
-        let iso = new Date(time).toISOString();
-        //console.log(config);
-        return config.db.collection("redThreshold").find({
-            utcDateTime: {
-                $gte: iso,
-            }
-        }).toArray().then((records) => {
-            records.forEach((record) => {
-                // create an array with all source names
-                // map through this array
-                // if the source name is found then send alerts to the given developers associated to that project
-                // if the source name is not found, then throw an error and send a notifcation to the notification channel
-                // on slack to let everyone know that one of the microservices wasnt covered in the above array with
-                // all the sources names
-                // var result = objArray.map(response => response.name);
-                return microServices.map((response) => {
-                    if (record.source === response.source) {
-                        if(record.field.name === 'CPU') {
-                            if (record.field.value > cpuAlertThreshold) {
-                                response.developers.forEach((developer) => {
-                                    alertEmail(developer.email);
-                                    alertSMS(developer.sms);
-                                    //alertSlack(developer.slack);
-                                })
-                            }
-                        } else if(record.field.name === 'STORAGE') {
-                            if (record.field.value > storageAlertThreshold) {
-                                response.developers.forEach((developer) => {
-                                    alertEmail(developer.email);
-                                    alertSMS(developer.sms);
-                                    //alertSlack(developer.slack);
-                                })
-                            }
-                        } else if(record.field.name === 'MEMORY') {
-                            if (record.field.value > memoryAlertThreshold) {
-                                response.developers.forEach((developer) => {
-                                    alertEmail(developer.email);
-                                    alertSMS(developer.sms);
-                                    // alertSlack(developer.slack);
-                                })
-                            }
-                        } else if(record.field.name === 'requestPerSecond') {
-                            if (record.field.value > rpsAlertThreshold) {
-                                response.developers.forEach((developer) => {
-                                    alertEmail(developer.email);
-                                    alertSMS(developer.sms);
-                                    //alertSlack(developer.slack);
-                                })
-                            }
-                        } else if(record.field.name === 'Time') {
-                            if (record.field.value > timeAlertThreshold) {
-                                response.developers.forEach((developer) => {
-                                    alertEmail(developer.email);
-                                    alertSMS(developer.sms);
-                                    //alertSlack(developer.slack);
-                                })
-                            }
-                        }
-                    }
-                    // }
-                });
-            })
-        })
-        // array of objects that have the different microservices and the developers associated to those microservices
-        // slack, email, and sms notifactions for users based off the microservice
-        // set higher thresholds for the notifcation that I did to get into redThreshold
-        // you dont want to be woken up in the middle of the night for something small
-        // by default send developers a notification on all platfroms then get a developers preference
-        // I need to build some sort of queue
-        // We dont want to be blown up every second, it would be better if we get a list compiled every so ma ny seconds or whatever the time scale is
-    }, pollingTime)
-}
-alertConsumer();
-// alertEmail();
-// alertSMS();
-// alertSlack();
+module.exports = {
+  skinnyFitWebCPUAlert: skinnyFitWebCPUAlert,
+};
